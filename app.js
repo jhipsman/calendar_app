@@ -350,6 +350,7 @@
   });
 
   // drag on a day column to create a timed event
+  const TOUCH_SLOP = 8; // px a finger may wander before a press counts as a scroll
   let drag = null;
   const snap = (col, clientY) => {
     const r = col.getBoundingClientRect();
@@ -360,23 +361,34 @@
     const col = e.target.closest('.daycol');
     if (!col || e.target.closest('.ev') || e.button !== 0) return;
     const m = snap(col, e.clientY);
-    const ghost = document.createElement('div');
-    ghost.className = 'ghost';
-    col.appendChild(ghost);
-    drag = { col, a: m, b: m + 60, ghost, moved: false };
+    drag = { col, a: m, b: m + 60, ghost: null, moved: false, touch: e.pointerType !== 'mouse', x0: e.clientX, y0: e.clientY };
+    // On touch a swipe here has to scroll the grid, so touch gets tap-to-create only (see pointerup).
+    if (drag.touch) return;
+    drag.ghost = document.createElement('div');
+    drag.ghost.className = 'ghost';
+    col.appendChild(drag.ghost);
     paintGhost();
-    col.setPointerCapture(e.pointerId);
+    try { col.setPointerCapture(e.pointerId); } catch { /* ignore */ }
   });
   viewEl.addEventListener('pointermove', (e) => {
     if (!drag) return;
+    if (drag.touch) {
+      if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > TOUCH_SLOP) drag = null; // it's a scroll
+      return;
+    }
     const m = snap(drag.col, e.clientY);
     if (m !== drag.a) { drag.moved = true; drag.b = m; paintGhost(); }
+  });
+  viewEl.addEventListener('pointercancel', () => {
+    if (!drag) return;
+    if (drag.ghost) drag.ghost.remove();
+    drag = null;
   });
   viewEl.addEventListener('pointerup', () => {
     if (!drag) return;
     let { a, b, col, ghost, moved } = drag;
     drag = null;
-    ghost.remove();
+    if (ghost) ghost.remove();
     if (!moved) { a = Math.floor(a / 60) * 60; b = a + 60; }
     let s = Math.min(a, b), en = Math.max(a, b);
     if (en - s < 15) en = s + 30;
@@ -389,9 +401,12 @@
   }
 
   // ---------- move / resize existing events ----------
+  // Mouse drags start right away. On touch, a swipe scrolls as usual and a long-press "lifts" the event
+  // first; the resize handle (touch-action: none) is the exception and drags immediately.
   let evDrag = null;
   let suppressClick = false;
   const DRAG_THRESHOLD = 4;
+  const LONG_PRESS = 350;
   const clampEnd = (m) => fromMin(Math.min(m, 1439));
   const q15 = (m) => Math.round(m / 15) * 15;
   const minuteAt = (col, clientY) => { const r = col.getBoundingClientRect(); return ((clientY - r.top) / r.height) * 1440; };
@@ -402,26 +417,48 @@
     const el = e.target.closest('.ev, .pill');
     const ev = el && state.events.find((x) => x.id === el.dataset.id);
     if (!ev) return;
-    const base = { ev, el, x0: e.clientX, y0: e.clientY, moved: false, cancelled: false, before: { ...ev } };
+    const touch = e.pointerType !== 'mouse';
+    const resize = !!e.target.closest('.ev-resize');
+    const base = { ev, el, x0: e.clientX, y0: e.clientY, moved: false, cancelled: false, before: { ...ev }, touch, armed: !touch || resize };
     if (el.classList.contains('ev')) {
       const col = el.closest('.daycol');
       const s = toMin(ev.start);
       const dur = Math.max(toMin(ev.end || ev.start) - s, 15);
-      evDrag = { ...base, kind: e.target.closest('.ev-resize') ? 'resize' : 'move', col, s, dur, grab: minuteAt(col, e.clientY) - s };
+      evDrag = { ...base, kind: resize ? 'resize' : 'move', col, s, dur, grab: minuteAt(col, e.clientY) - s };
     } else {
       evDrag = { ...base, kind: 'date', container: el.parentElement };
     }
+    if (!evDrag.armed) {
+      const d = evDrag;
+      d.timer = setTimeout(() => {
+        if (evDrag !== d) return;
+        d.armed = true;
+        d.el.classList.add('lifted');
+        try { if (navigator.vibrate) navigator.vibrate(12); } catch { /* haptics are optional */ }
+      }, LONG_PRESS);
+    }
   });
+
+  // Once an event is lifted, stop the browser from scrolling under the finger.
+  viewEl.addEventListener('touchmove', (e) => {
+    if ((evDrag && evDrag.armed) || (drag && !drag.touch)) e.preventDefault();
+  }, { passive: false });
+  viewEl.addEventListener('contextmenu', (e) => { if (evDrag && evDrag.touch) e.preventDefault(); });
 
   viewEl.addEventListener('pointermove', (e) => {
     const d = evDrag;
     if (!d || d.cancelled) return;
+    if (!d.armed) {
+      // Moved before the long-press fired: the finger is scrolling, so let it.
+      if (Math.hypot(e.clientX - d.x0, e.clientY - d.y0) > TOUCH_SLOP) { clearTimeout(d.timer); evDrag = null; }
+      return;
+    }
     if (!d.moved) {
       if (Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < DRAG_THRESHOLD) return;
       d.moved = true;
       // Capture only once dragging starts (capturing earlier retargets plain clicks to the view), and on
       // the view rather than the element so re-parenting the element mid-drag doesn't drop capture.
-      viewEl.setPointerCapture(e.pointerId);
+      try { viewEl.setPointerCapture(e.pointerId); } catch { /* pointer already gone; drag still works without capture */ }
       d.el.classList.add('dragging');
       document.body.classList.add(d.kind === 'resize' ? 'resizing' : 'grabbing');
     }
@@ -460,11 +497,15 @@
     const d = evDrag;
     if (!d) return;
     evDrag = null;
+    clearTimeout(d.timer);
+    d.el.classList.remove('lifted');
     document.body.classList.remove('grabbing', 'resizing');
-    if (!d.moved) return;
+    const longPressOnly = d.touch && d.armed && !d.moved;
+    if (!d.moved && !longPressOnly) return;
     // The click that follows pointerup must not open the editor.
     suppressClick = true;
     setTimeout(() => (suppressClick = false), 0);
+    if (longPressOnly) return;
     if (!d.cancelled) {
       if (d.kind === 'date') d.ev.date = d.container.dataset.date;
       else {

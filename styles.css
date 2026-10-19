@@ -256,9 +256,13 @@ input, textarea, select { font: inherit; color: inherit; }
 }
 
 /* ---------- drag & drop ---------- */
-.ev, .pill { touch-action: none; user-select: none; }
+.ev, .pill { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .ev { cursor: grab; }
-.ev-resize { position: absolute; left: 0; right: 0; bottom: 0; height: 8px; cursor: ns-resize; }
+.ev-resize { position: absolute; left: 0; right: 0; bottom: 0; height: 8px; cursor: ns-resize; touch-action: none; }
+.ev.lifted, .pill.lifted {
+  z-index: 20; transform: scale(1.04);
+  box-shadow: 0 0 0 2px var(--accent), 0 14px 32px rgba(0, 0, 0, 0.25);
+}
 .ev-resize::after {
   content: ""; position: absolute; left: 50%; bottom: 2px; width: 18px; height: 3px; margin-left: -9px;
   border-radius: 2px; background: var(--c); opacity: 0; transition: opacity 0.15s;
@@ -360,6 +364,16 @@ body.resizing, body.resizing * { cursor: ns-resize !important; }
 .swatch i { width: 12px; height: 12px; border-radius: 50%; background: var(--c); }
 .swatch:has(input:checked) { border-color: var(--c); background: color-mix(in srgb, var(--c) 12%, transparent); font-weight: 600; }
 .modal-actions { display: flex; gap: 8px; align-items: center; padding-top: 4px; }
+
+/* ---------- touch ---------- */
+body { -webkit-tap-highlight-color: transparent; }
+@media (pointer: coarse) {
+  /* iOS zooms the page when focusing inputs smaller than 16px. */
+  input, textarea, select { font-size: 16px; }
+  /* No hover on touch, so keep the resize grip visible and give it a bigger target. */
+  .ev-resize { height: 12px; }
+  .ev-resize::after { opacity: 0.5; }
+}
 
 /* ---------- responsive ---------- */
 @media (max-width: 900px) {
