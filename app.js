@@ -473,7 +473,7 @@
         d.ev.end = clampEnd(d.s + d.dur);
       }
       if (['date', 'start', 'end'].some((k) => d.ev[k] !== d.before[k])) {
-        save(STORE, state.events);
+        changed(d.ev);
         showUndo(d.ev, d.before, d.kind === 'resize' ? 'Resized' : 'Moved');
       }
     }
@@ -494,7 +494,7 @@
     t.classList.add('show');
     $('#toastUndo').onclick = () => {
       Object.assign(ev, before);
-      save(STORE, state.events);
+      changed(ev);
       render();
       t.classList.remove('show');
     };
@@ -550,22 +550,205 @@
       cal: form.cal.value,
       notes: form.notes.value.trim(),
     };
-    if (editing) Object.assign(editing, data);
-    else state.events.push({ id: uid(), ...data });
-    save(STORE, state.events);
+    let ev = editing;
+    if (ev) Object.assign(ev, data);
+    else state.events.push((ev = { id: uid(), ...data }));
+    changed(ev);
     closeModal();
     render();
   });
   $('#deleteBtn').onclick = () => {
     if (!editing) return;
     state.events = state.events.filter((x) => x !== editing);
-    save(STORE, state.events);
+    removed(editing.id);
     closeModal();
     render();
   };
   $('#cancelBtn').onclick = closeModal;
   $('#closeModal').onclick = closeModal;
   modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+  // ---------- sync ----------
+  // Events always live in localStorage, so the app works offline. With sync set up, local changes are
+  // queued in `pending` and pushed to /api/events, and other devices' changes are pulled on load, when
+  // the tab becomes visible, when the network comes back and every 30s. The last write to reach the
+  // server wins; an unsent local change always beats an incoming one.
+  const SYNC = 'cal.sync.v1';
+  const PENDING = 'cal.pending.v1';
+  const CHUNK = 200;
+  const syncModal = $('#syncModal');
+  const sync = { cfg: load(SYNC, null), pending: load(PENDING, {}), status: 'off', lastOk: 0, running: false, again: false };
+
+  function changed(ev) {
+    save(STORE, state.events);
+    queue({ id: ev.id, deleted: false, data: { ...ev } });
+  }
+  function removed(id) {
+    save(STORE, state.events);
+    queue({ id, deleted: true });
+  }
+  let pushTimer;
+  function queue(change) {
+    if (!sync.cfg) return;
+    sync.pending[change.id] = change;
+    save(PENDING, sync.pending);
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(syncNow, 400);
+  }
+
+  class SyncError extends Error { constructor(kind) { super(kind); this.kind = kind; } }
+  async function api(method, query = '', body) {
+    let res;
+    try {
+      res = await fetch(`/api/events${query}`, {
+        method,
+        headers: { authorization: `Bearer ${sync.cfg.password}`, ...(body ? { 'content-type': 'application/json' } : {}) },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch { throw new SyncError('offline'); }
+    if (res.status === 401) throw new SyncError('unauthorized');
+    if (!res.ok) throw new SyncError('error'); // 503 = not configured, 404 = API not deployed
+    return res.json();
+  }
+
+  async function syncNow() {
+    if (!sync.cfg) return setSync('off');
+    if (sync.running) { sync.again = true; return; }
+    sync.running = true;
+    setSync('syncing');
+    try {
+      const batch = Object.values(sync.pending);
+      for (let i = 0; i < batch.length; i += CHUNK) {
+        const part = batch.slice(i, i + CHUNK);
+        await api('POST', '', { changes: part });
+        // Only clear entries that weren't changed again while the request was in flight.
+        part.forEach((c) => { if (sync.pending[c.id] === c) delete sync.pending[c.id]; });
+        save(PENDING, sync.pending);
+      }
+      await pull();
+      setSync('ok');
+    } catch (err) {
+      setSync(err.kind || 'error');
+    } finally {
+      sync.running = false;
+      if (sync.again) { sync.again = false; syncNow(); }
+    }
+  }
+
+  async function pull() {
+    // Skip while an event is being edited or dragged; the next round picks the changes up.
+    if (modal.open || evDrag) return;
+    // A few seconds of overlap guards against writes that commit slightly out of order.
+    const res = await api('GET', `?since=${Math.max(sync.cfg.cursor - 5000, 0)}`);
+    let dirty = false;
+    for (const c of res.changes) {
+      if (sync.pending[c.id]) continue;
+      const i = state.events.findIndex((e) => e.id === c.id);
+      if (c.deleted) {
+        if (i >= 0) { state.events.splice(i, 1); dirty = true; }
+      } else if (i < 0) {
+        state.events.push(c.data); dirty = true;
+      } else if (JSON.stringify(state.events[i]) !== JSON.stringify(c.data)) {
+        // Update in place so references held elsewhere (undo toast) stay valid.
+        const ev = state.events[i];
+        Object.keys(ev).forEach((k) => delete ev[k]);
+        Object.assign(ev, c.data);
+        dirty = true;
+      }
+    }
+    sync.cfg.cursor = Math.max(sync.cfg.cursor, res.cursor);
+    save(SYNC, sync.cfg);
+    if (dirty) { save(STORE, state.events); render(); }
+  }
+
+  async function connect(password) {
+    sync.cfg = { password, cursor: 0 };
+    sync.pending = {};
+    const res = await api('GET', '?since=0'); // throws on a wrong password or missing setup
+    const live = res.changes.filter((c) => !c.deleted).map((c) => c.data);
+    if (live.length) {
+      // The cloud already has a calendar: this device switches to it.
+      state.events = live;
+      save(STORE, state.events);
+    } else {
+      // First device: upload what's here.
+      state.events.forEach((ev) => { sync.pending[ev.id] = { id: ev.id, deleted: false, data: { ...ev } }; });
+    }
+    sync.cfg.cursor = res.cursor;
+    save(SYNC, sync.cfg);
+    save(PENDING, sync.pending);
+    render();
+    await syncNow();
+  }
+
+  function disconnect() {
+    sync.cfg = null;
+    sync.pending = {};
+    try { localStorage.removeItem(SYNC); localStorage.removeItem(PENDING); } catch { /* ignore */ }
+    setSync('off');
+  }
+
+  const SYNC_TEXT = {
+    off: 'Sync is off. Events are saved only in this browser.',
+    syncing: 'Syncing…',
+    offline: 'Offline. Changes are saved here and will sync when you reconnect.',
+    unauthorized: 'The sync password was rejected. Turn sync off and reconnect.',
+    error: 'Sync isn’t reachable right now. Changes are saved here.',
+  };
+  const syncText = () => sync.status === 'ok'
+    ? `Synced at ${new Date(sync.lastOk).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+    : SYNC_TEXT[sync.status];
+
+  function setSync(status) {
+    sync.status = status;
+    if (status === 'ok') sync.lastOk = Date.now();
+    const btn = $('#syncBtn');
+    btn.dataset.status = status;
+    btn.title = syncText();
+    if (syncModal.open) fillSyncModal();
+  }
+  function fillSyncModal() {
+    $('#syncConnect').hidden = !!sync.cfg;
+    $('#syncConnected').hidden = !sync.cfg;
+    $('#syncState').textContent = syncText();
+    $('#syncState').dataset.status = sync.status;
+  }
+
+  $('#syncBtn').onclick = () => {
+    $('#syncError').textContent = '';
+    fillSyncModal();
+    syncModal.showModal();
+    if (!sync.cfg) $('#syncPassword').focus();
+  };
+  $('#syncForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const pw = $('#syncPassword').value;
+    if (!pw) return;
+    const btn = $('#syncConnectBtn');
+    btn.disabled = true;
+    $('#syncError').textContent = '';
+    try {
+      await connect(pw);
+      $('#syncPassword').value = '';
+    } catch (err) {
+      disconnect();
+      $('#syncError').textContent = {
+        unauthorized: 'Wrong password.',
+        offline: 'You’re offline. Try again when connected.',
+      }[err.kind] || 'Couldn’t reach sync. Is it set up in Cloudflare?';
+    } finally {
+      btn.disabled = false;
+      fillSyncModal();
+    }
+  });
+  $('#syncNowBtn').onclick = syncNow;
+  $('#syncOffBtn').onclick = () => { disconnect(); fillSyncModal(); };
+  $('#syncClose').onclick = () => syncModal.close();
+  syncModal.addEventListener('click', (e) => { if (e.target === syncModal) syncModal.close(); });
+
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncNow(); });
+  window.addEventListener('online', syncNow);
+  setInterval(() => { if (document.visibilityState === 'visible') syncNow(); }, 30000);
 
   // ---------- keyboard ----------
   document.addEventListener('keydown', (e) => {
@@ -575,7 +758,7 @@
       render();
       return;
     }
-    if (modal.open || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (modal.open || syncModal.open || e.metaKey || e.ctrlKey || e.altKey) return;
     if (/input|textarea|select/i.test(document.activeElement.tagName)) return;
     const k = e.key.toLowerCase();
     if (k === 'arrowleft' || k === 'j') shift(-1);
@@ -593,4 +776,5 @@
   setInterval(() => { if (state.view !== 'month') { const nl = viewEl.querySelector('.now-line'); if (nl) { const n = new Date(); nl.style.top = `calc(var(--hour)*${(n.getHours() * 60 + n.getMinutes()) / 60})`; } } renderUpcoming(); }, 60000);
 
   render();
+  syncNow();
 })();

@@ -289,6 +289,35 @@ body.resizing, body.resizing * { cursor: ns-resize !important; }
 }
 .toast button:hover { background: color-mix(in srgb, var(--bg) 28%, transparent); }
 
+/* ---------- sync ---------- */
+[hidden] { display: none !important; }
+.sync-btn { position: relative; }
+.sync-dot {
+  position: absolute; right: 5px; bottom: 6px; width: 9px; height: 9px; border-radius: 50%;
+  border: 2px solid var(--surface); background: var(--text-3);
+}
+.sync-btn[data-status="off"] .sync-dot { display: none; }
+.sync-btn[data-status="ok"] .sync-dot { background: #20b26b; }
+.sync-btn[data-status="syncing"] .sync-dot { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+.sync-btn[data-status="offline"] .sync-dot { background: #f2994a; }
+.sync-btn[data-status="unauthorized"] .sync-dot, .sync-btn[data-status="error"] .sync-dot { background: var(--danger); }
+@keyframes pulse { 50% { opacity: 0.35; } }
+
+.modal-title { flex: 1; margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.sync-state {
+  margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); color: var(--text-2);
+  display: flex; align-items: center; gap: 10px;
+}
+.sync-state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--text-3); }
+.sync-state[data-status="ok"]::before { background: #20b26b; }
+.sync-state[data-status="syncing"]::before { background: var(--accent); }
+.sync-state[data-status="offline"]::before { background: #f2994a; }
+.sync-state[data-status="unauthorized"]::before, .sync-state[data-status="error"]::before { background: var(--danger); }
+.hint { margin: 0; font-size: 13px; color: var(--text-2); line-height: 1.45; }
+.sync-error { margin: 0; font-size: 13px; color: var(--danger); }
+.sync-error:empty { display: none; }
+
 /* ---------- modal ---------- */
 .modal {
   border: 1px solid var(--border); border-radius: 18px; padding: 0; width: min(460px, calc(100vw - 32px));

@@ -1,3 +1,5 @@
 # Local-only files
 .claude/
 calendar-site.zip
+.wrangler/
+node_modules/
