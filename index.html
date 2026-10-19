@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Calendar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <span>Calendar</span>
+      </div>
+
+      <button class="btn btn-primary btn-new" id="newEventBtn">
+        <svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        New event
+      </button>
+
+      <section class="mini">
+        <div class="mini-head">
+          <span id="miniTitle"></span>
+          <div class="mini-nav">
+            <button class="icon-btn sm" id="miniPrev" aria-label="Previous month"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <button class="icon-btn sm" id="miniNext" aria-label="Next month"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          </div>
+        </div>
+        <div class="mini-grid" id="miniGrid"></div>
+      </section>
+
+      <section class="side-section">
+        <h3>Calendars</h3>
+        <ul class="cal-list" id="calList"></ul>
+      </section>
+
+      <section class="side-section">
+        <h3>Up next</h3>
+        <ul class="upcoming" id="upcoming"></ul>
+      </section>
+    </aside>
+
+    <main class="main">
+      <header class="toolbar">
+        <button class="icon-btn menu-btn" id="menuBtn" aria-label="Toggle sidebar">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <button class="btn btn-ghost" id="todayBtn">Today</button>
+        <div class="nav">
+          <button class="icon-btn" id="prevBtn" aria-label="Previous"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <button class="icon-btn" id="nextBtn" aria-label="Next"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        </div>
+        <h1 class="title" id="title"></h1>
+        <div class="spacer"></div>
+        <div class="seg" id="viewSeg" role="tablist">
+          <button data-view="month" role="tab">Month</button>
+          <button data-view="week" role="tab">Week</button>
+          <button data-view="day" role="tab">Day</button>
+          <span class="seg-pill"></span>
+        </div>
+        <button class="icon-btn" id="themeBtn" aria-label="Toggle theme">
+          <svg class="i-sun" viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <svg class="i-moon" viewBox="0 0 24 24" width="18" height="18"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+        </button>
+      </header>
+
+      <section class="view" id="view"></section>
+    </main>
+  </div>
+
+  <dialog class="modal" id="eventModal">
+    <form method="dialog" id="eventForm">
+      <div class="modal-head">
+        <input class="title-input" name="title" placeholder="Add title" autocomplete="off" required />
+        <button type="button" class="icon-btn" id="closeModal" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+      </div>
+      <div class="field-row">
+        <label class="field grow"><span>Date</span><input type="date" name="date" required /></label>
+        <label class="toggle"><input type="checkbox" name="allDay" /><span class="track"><span class="thumb"></span></span>All day</label>
+      </div>
+      <div class="field-row times">
+        <label class="field grow"><span>Start</span><input type="time" name="start" step="900" /></label>
+        <label class="field grow"><span>End</span><input type="time" name="end" step="900" /></label>
+      </div>
+      <div class="field">
+        <span>Calendar</span>
+        <div class="swatches" id="swatches"></div>
+      </div>
+      <label class="field"><span>Notes</span><textarea name="notes" rows="3" placeholder="Add a description"></textarea></label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-danger" id="deleteBtn">Delete</button>
+        <div class="spacer"></div>
+        <button type="button" class="btn btn-ghost" id="cancelBtn">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite">
+    <span id="toastMsg"></span>
+    <button type="button" id="toastUndo">Undo</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
