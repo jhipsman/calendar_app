@@ -41,7 +41,7 @@
     const t = new Date();
     const d = (n) => ymd(addDays(t, n));
     return [
-      { id: uid(), title: 'Team standup', date: d(0), start: '09:30', end: '09:45', cal: 'work' },
+      { id: uid(), title: 'Team standup', date: d(0), start: '09:30', end: '09:45', cal: 'work', repeat: { freq: 'weekly', days: [1, 2, 3, 4, 5] } },
       { id: uid(), title: 'Design review', date: d(0), start: '13:00', end: '14:30', cal: 'work' },
       { id: uid(), title: 'Gym', date: d(0), start: '18:00', end: '19:00', cal: 'health' },
       { id: uid(), title: 'Lunch with Sam', date: d(1), start: '12:00', end: '13:00', cal: 'social' },
@@ -68,10 +68,31 @@
   const persistPrefs = () => save(PREFS, { view: state.view, hidden: [...state.hidden], theme: document.documentElement.dataset.theme });
 
   const visible = () => state.events.filter((e) => !state.hidden.has(e.cal));
+
+  // ---------- recurrence ----------
+  // A repeating event is stored once, with `repeat: { freq, days?, until? }` (freq: daily | weekly |
+  // monthly | yearly; days: weekdays 0–6 for weekly) and `exceptions`: dates of skipped occurrences.
+  // Views expand it into occurrences: copies dated to the day they fall on, carrying `occ` so the UI
+  // knows which instance was clicked or dragged. Monthly on the 31st skips shorter months.
+  function occursOn(e, ds) {
+    const r = e.repeat;
+    if (!r) return e.date === ds;
+    if (ds < e.date || (r.until && ds > r.until) || (e.exceptions || []).includes(ds)) return false;
+    const a = parse(e.date), b = parse(ds);
+    switch (r.freq) {
+      case 'daily': return true;
+      case 'weekly': return (r.days && r.days.length ? r.days : [a.getDay()]).includes(b.getDay());
+      case 'monthly': return a.getDate() === b.getDate();
+      case 'yearly': return a.getDate() === b.getDate() && a.getMonth() === b.getMonth();
+      default: return false;
+    }
+  }
   const eventsOn = (dateStr) =>
     visible()
-      .filter((e) => e.date === dateStr)
+      .filter((e) => occursOn(e, dateStr))
+      .map((e) => (e.repeat ? { ...e, date: dateStr, occ: dateStr } : e))
       .sort((a, b) => (b.allDay ? 1 : 0) - (a.allDay ? 1 : 0) || (a.start || '').localeCompare(b.start || ''));
+  const dayDiff = (from, to) => Math.round((parse(to) - parse(from)) / 864e5);
 
   // ---------- elements ----------
   const $ = (s) => document.querySelector(s);
@@ -136,10 +157,19 @@
     fitMonthCells();
   }
 
+  const REPEAT_ICON = `<svg class="rep" viewBox="0 0 24 24" width="11" height="11" aria-label="Repeats"><path d="M17 2l3 3-3 3M4 11V9a4 4 0 0 1 4-4h16M7 22l-3-3 3-3M20 13v2a4 4 0 0 1-4 4H4" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  // data-id points at the stored event; data-occ marks which occurrence of a repeating one this is.
+  const evAttrs = (e) => `data-id="${e.id}"${e.occ ? ` data-occ="${e.occ}"` : ''}`;
+  const eventOf = (el) => {
+    const ev = state.events.find((x) => x.id === el.dataset.id);
+    return ev ? { ev, occ: el.dataset.occ || null } : null;
+  };
+
   function pillHTML(e) {
     const c = calOf(e.cal).color;
-    if (e.allDay) return `<div class="pill allday" style="--c:${c}" data-id="${e.id}"><span class="name">${esc(e.title)}</span></div>`;
-    return `<div class="pill timed" style="--c:${c}" data-id="${e.id}"><span class="dot"></span><span class="t">${fmtTime(e.start)}</span><span class="name">${esc(e.title)}</span></div>`;
+    const rep = e.repeat ? REPEAT_ICON : '';
+    if (e.allDay) return `<div class="pill allday" style="--c:${c}" ${evAttrs(e)}><span class="name">${esc(e.title)}</span>${rep}</div>`;
+    return `<div class="pill timed" style="--c:${c}" ${evAttrs(e)}><span class="dot"></span><span class="t">${fmtTime(e.start)}</span><span class="name">${esc(e.title)}</span>${rep}</div>`;
   }
 
   // Collapse overflowing pills into a "+N more" link based on actual cell height.
@@ -208,8 +238,8 @@
         const c = calOf(e.cal).color;
         const w = 100 / ncol;
         const short = en - s < 45;
-        body += `<div class="ev" data-id="${e.id}" style="--c:${c};top:calc(var(--hour)*${s / 60});height:calc(var(--hour)*${(en - s) / 60} - 2px);left:calc(${w * col}% + 2px);width:calc(${w}% - 4px)">
-          <div class="ev-title">${esc(e.title)}${short ? ` <span class="ev-time">${fmtTime(e.start)}</span>` : ''}</div>
+        body += `<div class="ev" ${evAttrs(e)} style="--c:${c};top:calc(var(--hour)*${s / 60});height:calc(var(--hour)*${(en - s) / 60} - 2px);left:calc(${w * col}% + 2px);width:calc(${w}% - 4px)">
+          <div class="ev-title">${esc(e.title)}${e.repeat ? REPEAT_ICON : ''}${short ? ` <span class="ev-time">${fmtTime(e.start)}</span>` : ''}</div>
           ${short ? '' : `<div class="ev-time">${fmtTime(e.start)} – ${fmtTime(e.end || e.start)}</div>`}
           <div class="ev-resize"></div>
         </div>`;
@@ -242,7 +272,6 @@
     $('#miniTitle').textContent = fmt(c, { month: 'long', year: 'numeric' });
     const start = startOfWeek(new Date(c.getFullYear(), c.getMonth(), 1));
     const today = new Date();
-    const dates = new Set(visible().map((e) => e.date));
     const wkStart = startOfWeek(state.cursor);
     let html = DOW.map((d) => `<div class="dow">${d[0]}</div>`).join('');
     for (let i = 0; i < 42; i++) {
@@ -253,7 +282,7 @@
         d.getMonth() !== c.getMonth() && 'out',
         sameDay(d, today) && 'today',
         sameDay(d, state.cursor) ? 'selected' : inWeek && 'in-range',
-        dates.has(ds) && 'has',
+        eventsOn(ds).length > 0 && 'has',
       ].filter(Boolean).join(' ');
       html += `<button class="${cls}" data-goto="${ds}">${d.getDate()}</button>`;
     }
@@ -272,16 +301,20 @@
   function renderUpcoming() {
     const now = new Date();
     const nowStr = ymd(now), nowMin = now.getHours() * 60 + now.getMinutes();
-    const list = visible()
-      .filter((e) => e.date > nowStr || (e.date === nowStr && (e.allDay || toMin(e.end || e.start) >= nowMin)))
-      .sort((a, b) => a.date.localeCompare(b.date) || (a.allDay ? -1 : b.allDay ? 1 : a.start.localeCompare(b.start)))
-      .slice(0, 5);
+    // Walk forward day by day so repeating events contribute their next occurrences.
+    const list = [];
+    for (let i = 0; i < 366 && list.length < 5; i++) {
+      for (const e of eventsOn(ymd(addDays(now, i)))) {
+        if (i === 0 && !e.allDay && toMin(e.end || e.start) < nowMin) continue;
+        if (list.length < 5) list.push(e);
+      }
+    }
     if (!list.length) { $('#upcoming').innerHTML = `<li class="empty">Nothing scheduled</li>`; return; }
     const tomorrow = ymd(addDays(now, 1));
     $('#upcoming').innerHTML = list.map((e) => {
       const day = e.date === nowStr ? 'Today' : e.date === tomorrow ? 'Tomorrow' : fmt(parse(e.date), { weekday: 'short', month: 'short', day: 'numeric' });
       const time = e.allDay ? 'All day' : `${fmtTime(e.start)} – ${fmtTime(e.end || e.start)}`;
-      return `<li data-id="${e.id}" style="--c:${calOf(e.cal).color}"><span class="bar"></span><div style="min-width:0"><div class="u-title">${esc(e.title)}</div><div class="u-meta">${day} · ${time}</div></div></li>`;
+      return `<li ${evAttrs(e)} style="--c:${calOf(e.cal).color}"><span class="bar"></span><div style="min-width:0"><div class="u-title">${esc(e.title)}${e.repeat ? REPEAT_ICON : ''}</div><div class="u-meta">${day} · ${time}</div></div></li>`;
     }).join('');
   }
 
@@ -335,9 +368,10 @@
   };
   $('#upcoming').onclick = (e) => {
     const li = e.target.closest('[data-id]');
-    if (!li) return;
+    const hit = li && eventOf(li);
+    if (!hit) return;
     setSidebar(false);
-    openModal(state.events.find((x) => x.id === li.dataset.id));
+    openModal(hit.ev, {}, hit.occ);
   };
   // On narrow screens the sidebar is an overlay drawer; the scrim behind it catches taps outside the
   // drawer so they close it instead of landing on the calendar underneath.
@@ -355,7 +389,7 @@
   viewEl.addEventListener('click', (e) => {
     if (suppressClick) return;
     const evEl = e.target.closest('[data-id]');
-    if (evEl) { openModal(state.events.find((x) => x.id === evEl.dataset.id)); return; }
+    if (evEl) { const hit = eventOf(evEl); if (hit) openModal(hit.ev, {}, hit.occ); return; }
     const more = e.target.closest('.more');
     if (more) { goTo(parse(more.dataset.date), 'day'); return; }
     const head = e.target.closest('[data-goto]');
@@ -432,11 +466,15 @@
   viewEl.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     const el = e.target.closest('.ev, .pill');
-    const ev = el && state.events.find((x) => x.id === el.dataset.id);
-    if (!ev) return;
+    const hit = el && eventOf(el);
+    if (!hit) return;
+    const { ev, occ } = hit;
     const touch = e.pointerType !== 'mouse';
     const resize = !!e.target.closest('.ev-resize');
-    const base = { ev, el, x0: e.clientX, y0: e.clientY, moved: false, cancelled: false, before: { ...ev }, touch, armed: !touch || resize };
+    const base = {
+      ev, occ, el, x0: e.clientX, y0: e.clientY, moved: false, cancelled: false,
+      before: { ...ev, date: occ || ev.date }, touch, armed: !touch || resize,
+    };
     if (el.classList.contains('ev')) {
       const col = el.closest('.daycol');
       const s = toMin(ev.start);
@@ -524,35 +562,63 @@
     setTimeout(() => (suppressClick = false), 0);
     if (longPressOnly) return;
     if (!d.cancelled) {
-      if (d.kind === 'date') d.ev.date = d.container.dataset.date;
-      else {
-        d.ev.date = d.col.dataset.date;
-        d.ev.start = fromMin(d.s);
-        d.ev.end = clampEnd(d.s + d.dur);
-      }
-      if (['date', 'start', 'end'].some((k) => d.ev[k] !== d.before[k])) {
-        changed(d.ev);
-        showUndo(d.ev, d.before, d.kind === 'resize' ? 'Resized' : 'Moved');
-      }
+      const next = d.kind === 'date'
+        ? { date: d.container.dataset.date }
+        : { date: d.col.dataset.date, start: fromMin(d.s), end: clampEnd(d.s + d.dur) };
+      if (Object.keys(next).some((k) => next[k] !== d.before[k])) applyMove(d, next);
     }
     render();
+  }
+
+  // A standalone (non-repeating) copy of a series, used when one occurrence is changed on its own.
+  const detach = (series, fields) => {
+    const { repeat, exceptions, ...rest } = series;
+    return { ...rest, id: uid(), ...fields };
+  };
+
+  function applyMove(d, next) {
+    const verb = d.kind === 'resize' ? 'Resized' : 'Moved';
+    if (d.occ) {
+      // Dragging one occurrence of a repeating event moves only that one: the series skips that date
+      // and a standalone copy takes its new place.
+      const series = d.ev;
+      const prevEx = series.exceptions || [];
+      const single = detach(series, next);
+      series.exceptions = [...prevEx, d.occ];
+      state.events.push(single);
+      changed(series);
+      changed(single);
+      showUndo(moveMsg(verb, single), () => {
+        series.exceptions = prevEx;
+        state.events = state.events.filter((x) => x !== single);
+        changed(series);
+        removed(single.id);
+      });
+    } else {
+      const ev = d.ev, before = d.before;
+      Object.assign(ev, next);
+      changed(ev);
+      showUndo(moveMsg(verb, ev), () => { Object.assign(ev, before); changed(ev); });
+    }
   }
   viewEl.addEventListener('pointerup', finishEvDrag);
   viewEl.addEventListener('pointercancel', () => { if (evDrag) evDrag.cancelled = true; finishEvDrag(); });
 
   // ---------- undo toast ----------
   let toastTimer;
-  function showUndo(ev, before, verb) {
-    const day = fmt(parse(ev.date), { weekday: 'short', month: 'short', day: 'numeric' });
-    const msg = verb === 'Resized'
+  const fmtDay = (ds) => fmt(parse(ds), { weekday: 'short', month: 'short', day: 'numeric' });
+  function moveMsg(verb, ev) {
+    const to = verb === 'Resized'
       ? `${fmtTime(ev.start)} – ${fmtTime(ev.end)}`
-      : ev.allDay ? day : `${day}, ${fmtTime(ev.start)}`;
-    $('#toastMsg').textContent = `${verb} “${ev.title}” to ${msg}`;
+      : ev.allDay ? fmtDay(ev.date) : `${fmtDay(ev.date)}, ${fmtTime(ev.start)}`;
+    return `${verb} “${ev.title}” to ${to}`;
+  }
+  function showUndo(msg, undo) {
+    $('#toastMsg').textContent = msg;
     const t = $('#toast');
     t.classList.add('show');
     $('#toastUndo').onclick = () => {
-      Object.assign(ev, before);
-      changed(ev);
+      undo();
       render();
       t.classList.remove('show');
     };
@@ -562,8 +628,11 @@
 
   // ---------- modal ----------
   let editing = null;
+  let editingOcc = null; // which occurrence was opened, for repeating events
   $('#swatches').innerHTML = CALENDARS.map((c) =>
     `<label class="swatch" style="--c:${c.color}"><input type="radio" name="cal" value="${c.id}" /><i></i>${c.name}</label>`).join('');
+  $('#weekdays').innerHTML = DOW.map((d, i) =>
+    `<label class="wd" title="${d}"><input type="checkbox" name="wd" value="${i}" /><span>${d[0]}</span></label>`).join('');
 
   const syncAllDay = () => $('.times').classList.toggle('hidden', form.allDay.checked);
   form.allDay.onchange = syncAllDay;
@@ -572,8 +641,82 @@
     form.end.value = fromMin(Math.min(toMin(form.start.value) + 60, 1439));
   };
 
-  function openModal(ev, defaults = {}) {
+  // --- repeat controls ---
+  const WEEKDAYS = [1, 2, 3, 4, 5];
+  const sameSet = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
+  const ordinal = (n) => { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
+  const wdBoxes = () => [...form.querySelectorAll('input[name=wd]')];
+  const checkedDays = () => wdBoxes().filter((b) => b.checked).map((b) => Number(b.value));
+  const setDays = (days) => wdBoxes().forEach((b) => { b.checked = days.includes(Number(b.value)); });
+
+  function syncRepeatUI() {
+    const d = form.date.value ? parse(form.date.value) : new Date();
+    const opt = (v) => form.repeat.querySelector(`option[value="${v}"]`);
+    opt('weekly').textContent = `Weekly on ${fmt(d, { weekday: 'long' })}`;
+    opt('monthly').textContent = `Monthly on the ${ordinal(d.getDate())}`;
+    opt('yearly').textContent = `Yearly on ${fmt(d, { month: 'short', day: 'numeric' })}`;
+    const v = form.repeat.value;
+    if (v === 'weekly' && checkedDays().length > 1) opt('weekly').textContent = 'Weekly on selected days';
+    $('#weekdays').hidden = v !== 'weekly';
+    $('#untilField').hidden = !v;
+  }
+  form.repeat.onchange = () => {
+    if (form.repeat.value === 'weekly' && !checkedDays().length) setDays([parse(form.date.value).getDay()]);
+    syncRepeatUI();
+  };
+  let lastFormDate = '';
+  form.date.addEventListener('change', () => {
+    // Moving the date moves the selected weekdays with it (Mon/Wed/Fri moved a day → Tue/Thu/Sat).
+    if (form.repeat.value === 'weekly' && form.date.value && lastFormDate) {
+      const shift = ((dayDiff(lastFormDate, form.date.value) % 7) + 7) % 7;
+      setDays(checkedDays().map((d) => (d + shift) % 7));
+    }
+    if (form.date.value) lastFormDate = form.date.value;
+    syncRepeatUI();
+  });
+  $('#weekdays').onchange = () => { if (!checkedDays().length) setDays([parse(form.date.value).getDay()]); syncRepeatUI(); };
+
+  function writeRepeat(r, dateStr) {
+    const isWeekdays = r && r.freq === 'weekly' && r.days && sameSet(r.days, WEEKDAYS);
+    form.repeat.value = !r ? '' : isWeekdays ? 'weekdays' : r.freq;
+    setDays(r && r.freq === 'weekly' && r.days && r.days.length ? r.days : [parse(dateStr).getDay()]);
+    form.until.value = (r && r.until) || '';
+    lastFormDate = dateStr;
+    syncRepeatUI();
+  }
+  function readRepeat() {
+    const v = form.repeat.value;
+    if (!v) return null;
+    const r = { freq: v === 'weekdays' ? 'weekly' : v };
+    if (v === 'weekdays') r.days = WEEKDAYS;
+    if (v === 'weekly') r.days = checkedDays().length ? checkedDays() : [parse(form.date.value).getDay()];
+    if (form.until.value && form.until.value >= form.date.value) r.until = form.until.value;
+    return r;
+  }
+
+  // --- "this event or all events?" prompt for repeating events ---
+  // Resolves to 'this', 'all' or null (cancelled). Buttons resolve directly rather than through the
+  // dialog's close event, which isn't reliably delivered for a dialog stacked on another.
+  const scopeModal = $('#scopeModal');
+  let scopeResolve = null;
+  function askScope(title) {
+    $('#scopeTitle').textContent = title;
+    scopeModal.showModal();
+    return new Promise((resolve) => { scopeResolve = resolve; });
+  }
+  function endScope(choice) {
+    if (scopeModal.open) scopeModal.close();
+    const resolve = scopeResolve;
+    scopeResolve = null;
+    if (resolve) resolve(choice || null);
+  }
+  scopeModal.querySelectorAll('[data-scope]').forEach((b) => { b.onclick = () => endScope(b.dataset.scope); });
+  scopeModal.addEventListener('cancel', (e) => { e.preventDefault(); endScope(null); }); // Esc
+  scopeModal.addEventListener('click', (e) => { if (e.target === scopeModal) endScope(null); });
+
+  function openModal(ev, defaults = {}, occ = null) {
     editing = ev || null;
+    editingOcc = ev && ev.repeat ? occ || ev.date : null;
     const now = new Date();
     const nextHour = fromMin(Math.min((now.getHours() + 1) * 60, 1380));
     const d = ev || {
@@ -581,12 +724,13 @@
       start: nextHour, end: fromMin(toMin(nextHour) + 60), cal: 'personal', notes: '', ...defaults,
     };
     form.title.value = d.title;
-    form.date.value = d.date;
+    form.date.value = editingOcc || d.date;
     form.allDay.checked = !!d.allDay;
     form.start.value = d.start || nextHour;
     form.end.value = d.end || fromMin(toMin(form.start.value) + 60);
     form.notes.value = d.notes || '';
     form.querySelector(`input[name=cal][value=${d.cal || 'personal'}]`).checked = true;
+    writeRepeat(d.repeat, form.date.value);
     $('#deleteBtn').style.visibility = ev ? 'visible' : 'hidden';
     syncAllDay();
     modal.showModal();
@@ -594,7 +738,7 @@
   }
   const closeModal = () => modal.close();
 
-  form.addEventListener('submit', (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const allDay = form.allDay.checked;
     let start = form.start.value, end = form.end.value;
@@ -608,19 +752,60 @@
       cal: form.cal.value,
       notes: form.notes.value.trim(),
     };
-    let ev = editing;
-    if (ev) Object.assign(ev, data);
-    else state.events.push((ev = { id: uid(), ...data }));
-    changed(ev);
+    const repeat = readRepeat();
+    const ev = editing;
+
+    if (ev && ev.repeat) {
+      const scope = await askScope('Save changes to a repeating event');
+      if (!scope) return; // keep the form open
+      if (scope === 'this') {
+        // Change just this occurrence: skip it in the series and save a standalone copy.
+        const single = detach(ev, data);
+        ev.exceptions = [...(ev.exceptions || []), editingOcc];
+        state.events.push(single);
+        changed(ev);
+        changed(single);
+      } else {
+        // Change the whole series. Moving this occurrence's date shifts the series by the same amount.
+        const seriesStart = ymd(addDays(parse(ev.date), dayDiff(editingOcc, data.date)));
+        Object.assign(ev, data, { date: seriesStart });
+        if (repeat) ev.repeat = repeat;
+        else { delete ev.repeat; delete ev.exceptions; }
+        changed(ev);
+      }
+    } else {
+      const target = ev || { id: uid() };
+      Object.assign(target, data);
+      if (repeat) target.repeat = repeat;
+      else delete target.repeat;
+      if (!ev) state.events.push(target);
+      changed(target);
+    }
     closeModal();
     render();
   });
-  $('#deleteBtn').onclick = () => {
-    if (!editing) return;
-    state.events = state.events.filter((x) => x !== editing);
-    removed(editing.id);
+
+  $('#deleteBtn').onclick = async () => {
+    const ev = editing, occ = editingOcc;
+    if (!ev) return;
+    if (ev.repeat) {
+      const scope = await askScope('Delete a repeating event');
+      if (!scope) return;
+      if (scope === 'this') {
+        const prevEx = ev.exceptions || [];
+        ev.exceptions = [...prevEx, occ];
+        changed(ev);
+        closeModal();
+        render();
+        showUndo(`Deleted “${ev.title}” on ${fmtDay(occ)}`, () => { ev.exceptions = prevEx; changed(ev); });
+        return;
+      }
+    }
+    state.events = state.events.filter((x) => x !== ev);
+    removed(ev.id);
     closeModal();
     render();
+    showUndo(`Deleted “${ev.title}”`, () => { state.events.push(ev); changed(ev); });
   };
   $('#cancelBtn').onclick = closeModal;
   $('#closeModal').onclick = closeModal;
@@ -816,7 +1001,7 @@
       render();
       return;
     }
-    if (modal.open || syncModal.open || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (modal.open || syncModal.open || scopeModal.open || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'Escape' && sidebarOpen()) { setSidebar(false); return; }
     if (/input|textarea|select/i.test(document.activeElement.tagName)) return;
     const k = e.key.toLowerCase();

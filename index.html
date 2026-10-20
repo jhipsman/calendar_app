@@ -100,6 +100,20 @@
         <label class="field grow"><span>Start</span><input type="time" name="start" step="900" /></label>
         <label class="field grow"><span>End</span><input type="time" name="end" step="900" /></label>
       </div>
+      <div class="field-row repeat-row">
+        <label class="field grow"><span>Repeat</span>
+          <select name="repeat">
+            <option value="">Does not repeat</option>
+            <option value="daily">Every day</option>
+            <option value="weekdays">Every weekday (Mon–Fri)</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+        </label>
+        <label class="field grow" id="untilField" hidden><span>Ends on (optional)</span><input type="date" name="until" /></label>
+      </div>
+      <div class="weekdays" id="weekdays" hidden></div>
       <div class="field">
         <span>Calendar</span>
         <div class="swatches" id="swatches"></div>
@@ -112,6 +126,20 @@
         <button type="submit" class="btn btn-primary">Save</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog class="modal modal-sm" id="scopeModal">
+    <div class="modal-body">
+      <h2 class="modal-title" id="scopeTitle">Repeating event</h2>
+      <div class="scope-options">
+        <button type="button" class="btn btn-ghost" data-scope="this">This event</button>
+        <button type="button" class="btn btn-ghost" data-scope="all">All events</button>
+      </div>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" class="btn" data-scope="">Cancel</button>
+      </div>
+    </div>
   </dialog>
 
   <dialog class="modal" id="syncModal">
