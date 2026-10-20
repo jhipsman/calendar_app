@@ -81,10 +81,16 @@
 
   // ---------- theme ----------
   const sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  // Match the phone's status bar / browser chrome to the toolbar colour.
+  const syncThemeColor = () => {
+    $('#themeColor').content = getComputedStyle(document.documentElement).getPropertyValue('--surface').trim();
+  };
   document.documentElement.dataset.theme = prefs.theme || (sysDark ? 'dark' : 'light');
+  syncThemeColor();
   $('#themeBtn').onclick = () => {
     const r = document.documentElement;
     r.dataset.theme = r.dataset.theme === 'dark' ? 'light' : 'dark';
+    syncThemeColor();
     persistPrefs();
   };
 
@@ -818,4 +824,9 @@
 
   render();
   syncNow();
+
+  // Offline support / installable app. Service workers need HTTPS (localhost is allowed for testing).
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+  }
 })();
