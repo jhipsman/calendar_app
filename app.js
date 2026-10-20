@@ -2,13 +2,13 @@
   'use strict';
 
   // ---------- config ----------
-  const CALENDARS = [
-    { id: 'personal', name: 'Personal', color: '#7c5cff' },
-    { id: 'work', name: 'Work', color: '#2f80ed' },
-    { id: 'family', name: 'Family', color: '#20b26b' },
-    { id: 'health', name: 'Health', color: '#f2994a' },
-    { id: 'social', name: 'Social', color: '#eb5a8c' },
+  // Each event has its own colour. Events created before that stored a calendar id in `cal`;
+  // LEGACY maps those ids to the colour they always showed in.
+  const COLORS = [
+    ['#7c5cff', 'Violet'], ['#2f80ed', 'Blue'], ['#0ea5b7', 'Teal'], ['#20b26b', 'Green'], ['#74b316', 'Lime'],
+    ['#d9a20b', 'Gold'], ['#f2994a', 'Orange'], ['#e5484d', 'Red'], ['#eb5a8c', 'Pink'], ['#8b8d98', 'Gray'],
   ];
+  const LEGACY = { personal: '#7c5cff', work: '#2f80ed', family: '#20b26b', health: '#f2994a', social: '#eb5a8c' };
   const STORE = 'cal.events.v1';
   const PREFS = 'cal.prefs.v1';
   const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -29,7 +29,7 @@
     return m ? `${hh}:${pad(m)}${ap}` : `${hh}${ap}`;
   };
   const fmt = (d, opts) => d.toLocaleDateString(undefined, opts);
-  const calOf = (id) => CALENDARS.find((c) => c.id === id) || CALENDARS[0];
+  const colorOf = (e) => e.color || LEGACY[e.cal] || COLORS[0][0];
   const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -41,17 +41,17 @@
     const t = new Date();
     const d = (n) => ymd(addDays(t, n));
     return [
-      { id: uid(), title: 'Team standup', date: d(0), start: '09:30', end: '09:45', cal: 'work', repeat: { freq: 'weekly', days: [1, 2, 3, 4, 5] } },
-      { id: uid(), title: 'Design review', date: d(0), start: '13:00', end: '14:30', cal: 'work' },
-      { id: uid(), title: 'Gym', date: d(0), start: '18:00', end: '19:00', cal: 'health' },
-      { id: uid(), title: 'Lunch with Sam', date: d(1), start: '12:00', end: '13:00', cal: 'social' },
-      { id: uid(), title: 'Product sync', date: d(1), start: '12:30', end: '13:30', cal: 'work' },
-      { id: uid(), title: 'Dentist', date: d(2), start: '10:00', end: '11:00', cal: 'health' },
-      { id: uid(), title: 'Family dinner', date: d(3), start: '19:00', end: '21:00', cal: 'family' },
-      { id: uid(), title: 'Weekend trip', date: d(5), allDay: true, cal: 'personal' },
-      { id: uid(), title: 'Quarterly planning', date: d(7), start: '10:00', end: '12:00', cal: 'work' },
-      { id: uid(), title: 'Book club', date: d(-2), start: '19:30', end: '21:00', cal: 'social' },
-      { id: uid(), title: 'Morning run', date: d(-1), start: '07:00', end: '07:45', cal: 'health' },
+      { id: uid(), title: 'Team standup', date: d(0), start: '09:30', end: '09:45', color: LEGACY.work, repeat: { freq: 'weekly', days: [1, 2, 3, 4, 5] } },
+      { id: uid(), title: 'Design review', date: d(0), start: '13:00', end: '14:30', color: LEGACY.work },
+      { id: uid(), title: 'Gym', date: d(0), start: '18:00', end: '19:00', color: LEGACY.health },
+      { id: uid(), title: 'Lunch with Sam', date: d(1), start: '12:00', end: '13:00', color: LEGACY.social },
+      { id: uid(), title: 'Product sync', date: d(1), start: '12:30', end: '13:30', color: LEGACY.work },
+      { id: uid(), title: 'Dentist', date: d(2), start: '10:00', end: '11:00', color: LEGACY.health },
+      { id: uid(), title: 'Family dinner', date: d(3), start: '19:00', end: '21:00', color: LEGACY.family },
+      { id: uid(), title: 'Weekend trip', date: d(5), allDay: true, color: LEGACY.personal },
+      { id: uid(), title: 'Quarterly planning', date: d(7), start: '10:00', end: '12:00', color: LEGACY.work },
+      { id: uid(), title: 'Book club', date: d(-2), start: '19:30', end: '21:00', color: LEGACY.social },
+      { id: uid(), title: 'Morning run', date: d(-1), start: '07:00', end: '07:45', color: LEGACY.health },
     ];
   }
 
@@ -61,13 +61,11 @@
     view: prefs.view || 'month',
     cursor: new Date(),
     miniCursor: new Date(),
-    hidden: new Set(prefs.hidden || []),
+    lastColor: prefs.lastColor || COLORS[0][0], // new events start in the colour used last
     events: load(STORE, null) || seed(),
   };
   save(STORE, state.events);
-  const persistPrefs = () => save(PREFS, { view: state.view, hidden: [...state.hidden], theme: document.documentElement.dataset.theme });
-
-  const visible = () => state.events.filter((e) => !state.hidden.has(e.cal));
+  const persistPrefs = () => save(PREFS, { view: state.view, lastColor: state.lastColor, theme: document.documentElement.dataset.theme });
 
   // ---------- recurrence ----------
   // A repeating event is stored once, with `repeat: { freq, days?, until? }` (freq: daily | weekly |
@@ -88,7 +86,7 @@
     }
   }
   const eventsOn = (dateStr) =>
-    visible()
+    state.events
       .filter((e) => occursOn(e, dateStr))
       .map((e) => (e.repeat ? { ...e, date: dateStr, occ: dateStr } : e))
       .sort((a, b) => (b.allDay ? 1 : 0) - (a.allDay ? 1 : 0) || (a.start || '').localeCompare(b.start || ''));
@@ -166,7 +164,7 @@
   };
 
   function pillHTML(e) {
-    const c = calOf(e.cal).color;
+    const c = colorOf(e);
     const rep = e.repeat ? REPEAT_ICON : '';
     if (e.allDay) return `<div class="pill allday" style="--c:${c}" ${evAttrs(e)}><span class="name">${esc(e.title)}</span>${rep}</div>`;
     return `<div class="pill timed" style="--c:${c}" ${evAttrs(e)}><span class="dot"></span><span class="t">${fmtTime(e.start)}</span><span class="name">${esc(e.title)}</span>${rep}</div>`;
@@ -235,7 +233,7 @@
       allday += `<div class="adcol" data-date="${ds}">${evs.filter((e) => e.allDay).map(pillHTML).join('')}</div>`;
       body += `<div class="daycol${isToday ? ' today' : ''}" data-date="${ds}">`;
       layoutDay(evs.filter((e) => !e.allDay)).forEach(({ e, s, en, col, ncol }) => {
-        const c = calOf(e.cal).color;
+        const c = colorOf(e);
         const w = 100 / ncol;
         const short = en - s < 45;
         body += `<div class="ev" ${evAttrs(e)} style="--c:${c};top:calc(var(--hour)*${s / 60});height:calc(var(--hour)*${(en - s) / 60} - 2px);left:calc(${w * col}% + 2px);width:calc(${w}% - 4px)">
@@ -289,15 +287,6 @@
     $('#miniGrid').innerHTML = html;
   }
 
-  function renderCalList() {
-    const check = `<svg viewBox="0 0 24 24" width="10" height="10"><path d="M5 12l5 5L20 7" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    $('#calList').innerHTML = CALENDARS.map((c) => `
-      <li><label style="--c:${c.color}">
-        <input type="checkbox" data-cal="${c.id}" ${state.hidden.has(c.id) ? '' : 'checked'} />
-        <span class="cal-check">${check}</span>${c.name}
-      </label></li>`).join('');
-  }
-
   function renderUpcoming() {
     const now = new Date();
     const nowStr = ymd(now), nowMin = now.getHours() * 60 + now.getMinutes();
@@ -314,7 +303,7 @@
     $('#upcoming').innerHTML = list.map((e) => {
       const day = e.date === nowStr ? 'Today' : e.date === tomorrow ? 'Tomorrow' : fmt(parse(e.date), { weekday: 'short', month: 'short', day: 'numeric' });
       const time = e.allDay ? 'All day' : `${fmtTime(e.start)} – ${fmtTime(e.end || e.start)}`;
-      return `<li ${evAttrs(e)} style="--c:${calOf(e.cal).color}"><span class="bar"></span><div style="min-width:0"><div class="u-title">${esc(e.title)}${e.repeat ? REPEAT_ICON : ''}</div><div class="u-meta">${day} · ${time}</div></div></li>`;
+      return `<li ${evAttrs(e)} style="--c:${colorOf(e)}"><span class="bar"></span><div style="min-width:0"><div class="u-title">${esc(e.title)}${e.repeat ? REPEAT_ICON : ''}</div><div class="u-meta">${day} · ${time}</div></div></li>`;
     }).join('');
   }
 
@@ -327,7 +316,6 @@
       renderTimeGrid(Array.from({ length: 7 }, (_, i) => addDays(s, i)));
     } else renderTimeGrid([state.cursor]);
     renderMini();
-    renderCalList();
     renderUpcoming();
     if (animate) { viewEl.classList.remove('fade'); void viewEl.offsetWidth; viewEl.classList.add('fade'); }
   }
@@ -359,12 +347,6 @@
     if (!b) return;
     goTo(parse(b.dataset.goto));
     setSidebar(false);
-  };
-  $('#calList').onchange = (e) => {
-    const id = e.target.dataset.cal;
-    e.target.checked ? state.hidden.delete(id) : state.hidden.add(id);
-    persistPrefs();
-    render();
   };
   $('#upcoming').onclick = (e) => {
     const li = e.target.closest('[data-id]');
@@ -629,8 +611,8 @@
   // ---------- modal ----------
   let editing = null;
   let editingOcc = null; // which occurrence was opened, for repeating events
-  $('#swatches').innerHTML = CALENDARS.map((c) =>
-    `<label class="swatch" style="--c:${c.color}"><input type="radio" name="cal" value="${c.id}" /><i></i>${c.name}</label>`).join('');
+  $('#swatches').innerHTML = COLORS.map(([c, name]) =>
+    `<label class="swatch" style="--c:${c}" title="${name}"><input type="radio" name="color" value="${c}" aria-label="${name}" /><i></i></label>`).join('');
   $('#weekdays').innerHTML = DOW.map((d, i) =>
     `<label class="wd" title="${d}"><input type="checkbox" name="wd" value="${i}" /><span>${d[0]}</span></label>`).join('');
 
@@ -721,7 +703,7 @@
     const nextHour = fromMin(Math.min((now.getHours() + 1) * 60, 1380));
     const d = ev || {
       title: '', date: ymd(state.cursor), allDay: false,
-      start: nextHour, end: fromMin(toMin(nextHour) + 60), cal: 'personal', notes: '', ...defaults,
+      start: nextHour, end: fromMin(toMin(nextHour) + 60), color: state.lastColor, notes: '', ...defaults,
     };
     form.title.value = d.title;
     form.date.value = editingOcc || d.date;
@@ -729,7 +711,8 @@
     form.start.value = d.start || nextHour;
     form.end.value = d.end || fromMin(toMin(form.start.value) + 60);
     form.notes.value = d.notes || '';
-    form.querySelector(`input[name=cal][value=${d.cal || 'personal'}]`).checked = true;
+    const swatch = form.querySelector(`input[name=color][value="${colorOf(d)}"]`) || form.querySelector('input[name=color]');
+    swatch.checked = true;
     writeRepeat(d.repeat, form.date.value);
     $('#deleteBtn').style.visibility = ev ? 'visible' : 'hidden';
     syncAllDay();
@@ -749,9 +732,11 @@
       allDay,
       start: allDay ? '' : start,
       end: allDay ? '' : end,
-      cal: form.cal.value,
+      color: form.color.value,
       notes: form.notes.value.trim(),
     };
+    state.lastColor = data.color;
+    persistPrefs();
     const repeat = readRepeat();
     const ev = editing;
 
@@ -761,6 +746,7 @@
       if (scope === 'this') {
         // Change just this occurrence: skip it in the series and save a standalone copy.
         const single = detach(ev, data);
+        delete single.cal;
         ev.exceptions = [...(ev.exceptions || []), editingOcc];
         state.events.push(single);
         changed(ev);
@@ -769,6 +755,7 @@
         // Change the whole series. Moving this occurrence's date shifts the series by the same amount.
         const seriesStart = ymd(addDays(parse(ev.date), dayDiff(editingOcc, data.date)));
         Object.assign(ev, data, { date: seriesStart });
+        delete ev.cal;
         if (repeat) ev.repeat = repeat;
         else { delete ev.repeat; delete ev.exceptions; }
         changed(ev);
@@ -776,6 +763,7 @@
     } else {
       const target = ev || { id: uid() };
       Object.assign(target, data);
+      delete target.cal;
       if (repeat) target.repeat = repeat;
       else delete target.repeat;
       if (!ev) state.events.push(target);
