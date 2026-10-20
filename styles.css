@@ -149,6 +149,7 @@ input, textarea, select { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--border); background: var(--surface);
 }
 .menu-btn { display: none; }
+.scrim, .sidebar-close { display: none; }
 .nav { display: flex; }
 .title { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .spacer { flex: 1; }
@@ -392,6 +393,12 @@ body { -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
     transition: transform 0.25s ease; box-shadow: var(--shadow-lg);
   }
   .sidebar.open { transform: none; }
+  .scrim {
+    display: block; position: fixed; inset: 0; z-index: 45; background: rgba(10, 10, 20, 0.4);
+    opacity: 0; pointer-events: none; transition: opacity 0.25s ease;
+  }
+  .scrim.show { opacity: 1; pointer-events: auto; }
+  .sidebar-close { display: inline-grid; margin-left: auto; }
   .menu-btn { display: inline-grid; }
   .toolbar { flex-wrap: wrap; padding: calc(12px + var(--safe-t)) calc(16px + var(--safe-r)) 12px calc(16px + var(--safe-l)); }
   .title { font-size: 17px; }

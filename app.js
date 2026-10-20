@@ -325,7 +325,7 @@
     const b = e.target.closest('[data-goto]');
     if (!b) return;
     goTo(parse(b.dataset.goto));
-    $('#sidebar').classList.remove('open');
+    setSidebar(false);
   };
   $('#calList').onchange = (e) => {
     const id = e.target.dataset.cal;
@@ -335,10 +335,21 @@
   };
   $('#upcoming').onclick = (e) => {
     const li = e.target.closest('[data-id]');
-    if (li) openModal(state.events.find((x) => x.id === li.dataset.id));
+    if (!li) return;
+    setSidebar(false);
+    openModal(state.events.find((x) => x.id === li.dataset.id));
   };
-  $('#menuBtn').onclick = () => $('#sidebar').classList.toggle('open');
-  $('#newEventBtn').onclick = () => { $('#sidebar').classList.remove('open'); openModal(null, { date: ymd(state.cursor) }); };
+  // On narrow screens the sidebar is an overlay drawer; the scrim behind it catches taps outside the
+  // drawer so they close it instead of landing on the calendar underneath.
+  const sidebarOpen = () => $('#sidebar').classList.contains('open');
+  function setSidebar(open) {
+    $('#sidebar').classList.toggle('open', open);
+    $('#scrim').classList.toggle('show', open);
+  }
+  $('#menuBtn').onclick = () => setSidebar(!sidebarOpen());
+  $('#sidebarClose').onclick = () => setSidebar(false);
+  $('#scrim').onclick = () => setSidebar(false);
+  $('#newEventBtn').onclick = () => { setSidebar(false); openModal(null, { date: ymd(state.cursor) }); };
 
   // ---------- view interactions ----------
   viewEl.addEventListener('click', (e) => {
@@ -806,6 +817,7 @@
       return;
     }
     if (modal.open || syncModal.open || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'Escape' && sidebarOpen()) { setSidebar(false); return; }
     if (/input|textarea|select/i.test(document.activeElement.tagName)) return;
     const k = e.key.toLowerCase();
     if (k === 'arrowleft' || k === 'j') shift(-1);
